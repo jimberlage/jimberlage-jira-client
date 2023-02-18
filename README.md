@@ -9,3 +9,11 @@ If you need a more featureful client, try [jira](https://crates.io/crates/jira).
 ```
 cargo add jimberlage_jira_client
 ```
+
+## Tests
+
+Most tests in this repository are doc tests.  I unfortunately don't have a good way to do tests against the JIRA REST client, as that would require a dedicated public JIRA instance and personal access token.
+
+```
+cargo test
+```

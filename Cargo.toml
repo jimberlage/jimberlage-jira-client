@@ -1,7 +1,11 @@
 [package]
 name = "jimberlage_jira_client"
+description = "Provides a REST client to access the JIRA V3 API.  It aims to be complete, but is not yet; should only be used if you have the inclination to add features you want."
 version = "1.0.0"
 edition = "2021"
+license = "MIT"
+license-file = "LICENSE"
+repository = "https://github.com/jimberlage/jimberlage_jira_client"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
