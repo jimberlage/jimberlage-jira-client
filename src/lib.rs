@@ -1,5 +1,3 @@
-/// Contains all code related to interfacing with JIRA.
-/// This includes functionality for getting projects and breaking them down into initiatives.
 use std::collections::HashMap;
 
 use base64::{
@@ -20,23 +18,35 @@ use self::jql::JQLStatement;
 pub mod jql;
 pub mod util;
 
+/// Represents a field in JIRA, as returned by a [get fields request][1].
+///
+/// [1]: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-get
 #[derive(Debug, Deserialize)]
 pub struct Field {
     pub id: String,
+
     pub name: String,
 }
 
-/// Represents an issue in JIRA, as returned by a search request [1].
+/// Represents an issue in JIRA, as returned by a [search request][1].
 ///
 /// [1]: https://docs.atlassian.com/software/jira/docs/api/REST/9.6.0/#api/2/search-searchUsingSearchRequest
 #[derive(Debug, Deserialize)]
 pub struct SearchIssue {
     pub id: String,
+
     pub key: String,
+
     pub fields: HashMap<String, JSONValue>,
 }
 
 impl SearchIssue {
+    /// Returns the statusCategory from the status field in an issue result.
+    ///
+    /// For this to appear in the list of fields, JIRA requires the `"status"` field to be passed into the search
+    /// request body.  Fields make no guarantees about their typing, so we just reach into the JSON object directly
+    /// rather than having a separate type for it.  If this returns `None` when you expect a value, check the body of
+    /// the request to get issues to see if the status field is specified.
     pub fn status_category(&self) -> Option<String> {
         if let Some(status_obj) = self.fields.get("status") {
             let path = vec!["statusCategory", "name"];
@@ -47,12 +57,13 @@ impl SearchIssue {
         None
     }
 
-    pub fn story_points(&self, field_ids: &Vec<String>) -> Option<f64> {
-        for field_id in field_ids {
-            if let Some(JSONValue::Number(points)) = self.fields.get(field_id) {
-                if let Some(points_f64) = points.as_f64() {
-                    return Some(points_f64);
-                }
+    /// Returns an f64 from a field, if that is how the JSON is laid out.
+    ///
+    /// Useful for things like story point fields.
+    pub fn numeric_field(&self, field_id: &str) -> Option<f64> {
+        if let Some(JSONValue::Number(n)) = self.fields.get(field_id) {
+            if let Some(n_f64) = n.as_f64() {
+                return Some(n_f64);
             }
         }
 
@@ -109,6 +120,12 @@ pub struct IssueEditRequest {
     pub update: IssueEditUpdate,
 }
 
+/// Provides a reusable HTTP client for using parts of JIRA's [V3 REST API][1].
+///
+/// It is currently suitable for my personal projects, and is not a complete implementation.  However, feel free to
+/// extend this to meet your needs.
+///
+/// [1]: https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/
 pub struct RestClient {
     base_url: String,
     client: Client,
@@ -116,6 +133,9 @@ pub struct RestClient {
 
 impl RestClient {
     /// Initialize a RestClient for the URL, with the given username and token.
+    ///
+    /// This may fail if the TLS backend cannot be initialized, or if the resolver cannot load the system
+    /// configuration.
     pub fn new(url: &str, username: &str, token: &str) -> Result<Self, reqwest::Error> {
         let base64_engine =
             GeneralPurpose::new(&base64::alphabet::URL_SAFE, GeneralPurposeConfig::new());
@@ -135,6 +155,9 @@ impl RestClient {
         })
     }
 
+    /// Encodes the auth header according to JIRA's [REST API V3 conventions][1].
+    ///
+    /// [1]: https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis/
     fn add_auth_header(
         headers: &mut HeaderMap,
         base64_engine: &GeneralPurpose,
@@ -150,18 +173,33 @@ impl RestClient {
         headers.insert(AUTHORIZATION, auth_header_value);
     }
 
+    /// Make a GET request to the specified path, using the URL, username, & token configured for the client.
+    ///
+    /// Returns a `reqwest::RequestBuilder` so that you can use any method available in the reqwest library.
     fn get(&self, path: &str) -> RequestBuilder {
         self.client.get(format!("{}/{}", self.base_url, path))
     }
 
+    /// Make a POST request to the specified path, using the URL, username, & token configured for the client.
+    ///
+    /// Returns a `reqwest::RequestBuilder` so that you can use any method available in the reqwest library.
     fn post(&self, path: &str) -> RequestBuilder {
         self.client.post(format!("{}/{}", self.base_url, path))
     }
 
+    /// Make a PUT request to the specified path, using the URL, username, & token configured for the client.
+    ///
+    /// Returns a `reqwest::RequestBuilder` so that you can use any method available in the reqwest library.
     fn put(&self, path: &str) -> RequestBuilder {
         self.client.put(format!("{}/{}", self.base_url, path))
     }
 
+    /// Gets all configured fields for your JIRA instance.
+    ///
+    /// This is important because some critical functionality (story points, for example) are implemented as custom
+    /// fields, so this call is needed to match the ones for your integration by name.
+    ///
+    /// See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-get
     pub fn get_fields(&self) -> Result<Vec<Field>, reqwest::Error> {
         let response = self.get("/field").send()?.error_for_status()?;
         let fields: Vec<Field> = response.json()?;
@@ -169,7 +207,13 @@ impl RestClient {
         Ok(fields)
     }
 
-    fn single_page_search(
+    /// Search JIRA for issues matching the given JQL statement.
+    ///
+    /// This calls the search endpoint without getting all pages; a more handy method may be `search_all`, which visits
+    /// each page for you.
+    ///
+    /// See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-post
+    fn search(
         &self,
         fields: &Vec<String>,
         jql: &JQLStatement,
@@ -189,7 +233,13 @@ impl RestClient {
         response.json()
     }
 
-    pub fn search(
+    /// Search JIRA for issues matching the given JQL statement.
+    ///
+    /// This will get each page for you; it is handy if you want to avoid dealing with pagination in the result set.
+    /// If having explicit pagination is helpful, try `search`.
+    ///
+    /// See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-post
+    pub fn search_all(
         &self,
         fields: &Vec<String>,
         jql: &JQLStatement,
@@ -199,7 +249,7 @@ impl RestClient {
         let mut result = vec![];
 
         loop {
-            let mut response = self.single_page_search(fields, jql, start_at, max_results)?;
+            let mut response = self.search(fields, jql, start_at, max_results)?;
             let num_responses = response.issues.len() as u64;
             result.append(&mut response.issues);
 
@@ -213,6 +263,11 @@ impl RestClient {
         Ok(result)
     }
 
+    /// Edits an issue.
+    ///
+    /// For now, this only supports the methods in the "update" key of the request, but could be extended.
+    ///
+    /// See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-issueidorkey-put
     pub fn edit_issue(&self, key: &str, update: &IssueEditUpdate) -> Result<(), reqwest::Error> {
         let path = format!("/issue/{}", key);
         let response = self
