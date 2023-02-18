@@ -4,7 +4,6 @@ description = "Provides a REST client to access the JIRA V3 API.  It aims to be 
 version = "1.0.0"
 edition = "2021"
 license = "MIT"
-license-file = "LICENSE"
 repository = "https://github.com/jimberlage/jimberlage_jira_client"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
