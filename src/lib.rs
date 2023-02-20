@@ -28,6 +28,23 @@ pub struct Field {
     pub name: String,
 }
 
+/// Represents a user in JIRA, as returned by a [user search request][1].
+///
+/// [1]: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-user-search/#api-rest-api-3-user-picker-get
+#[derive(Debug, Deserialize)]
+pub struct SearchUser {
+    #[serde(rename(deserialize = "accountId"))]
+    pub account_id: String,
+}
+
+/// Represents a response from a [user search request][1].
+///
+/// [1]: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-user-search/#api-rest-api-3-user-picker-get
+#[derive(Debug, Deserialize)]
+pub struct SearchUserResponse {
+    pub users: Vec<SearchUser>,
+}
+
 /// Represents an issue in JIRA, as returned by a [search request][1].
 ///
 /// [1]: https://docs.atlassian.com/software/jira/docs/api/REST/9.6.0/#api/2/search-searchUsingSearchRequest
@@ -261,6 +278,18 @@ impl RestClient {
         }
 
         Ok(result)
+    }
+
+    /// Searches for users in JIRA by key or email.
+    ///
+    /// See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-user-search/#api-rest-api-3-user-picker-get
+    pub fn search_users(&self, query: &str) -> Result<SearchUserResponse, reqwest::Error> {
+        let response = self
+            .get("/user/picker")
+            .query(&[("query", query)])
+            .send()?
+            .error_for_status()?;
+        response.json()
     }
 
     /// Edits an issue.

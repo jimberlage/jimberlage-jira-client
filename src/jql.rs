@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use serde::{Serialize, Serializer};
 
 /// Escapes text for use in a JQL query.
@@ -50,6 +51,7 @@ pub trait SerializableToJQL {
 #[derive(Debug, Clone)]
 pub enum JQLValue {
     String(String),
+    NaiveDate(NaiveDate),
     /* Float, Int, Uint, approved(), etc. would go here */
 }
 
@@ -69,6 +71,7 @@ impl SerializableToJQL for JQLValue {
     fn serialize_to_jql(&self) -> String {
         match self {
             JQLValue::String(contents) => escape_text_field(contents),
+            JQLValue::NaiveDate(date) => format!("\"{}\"", date.format("%Y-%m-%d").to_string()),
         }
     }
 }
@@ -82,7 +85,9 @@ impl SerializableToJQL for JQLValue {
 #[derive(Debug, Clone)]
 pub enum JQLClause {
     And(Vec<Box<JQLClause>>),
+    GreaterThanEquals(String, JQLValue),
     In(String, Vec<JQLValue>),
+    LessThanEquals(String, JQLValue),
     /* OR, =, CONTAINS, etc. would go here */
 }
 
@@ -133,6 +138,9 @@ impl SerializableToJQL for JQLClause {
                     .join(" AND ");
                 format!("({})", joined_clauses)
             }
+            JQLClause::GreaterThanEquals(field, value) => {
+                format!("{} >= {}", field, value.serialize_to_jql())
+            }
             JQLClause::In(field, values) => {
                 let joined_values = values
                     .iter()
@@ -141,7 +149,56 @@ impl SerializableToJQL for JQLClause {
                     .join(", ");
                 format!("{} IN ({})", field, joined_values)
             }
+            JQLClause::LessThanEquals(field, value) => {
+                format!("{} <= {}", field, value.serialize_to_jql())
+            }
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum JQLOrdering {
+    Asc,
+    Desc,
+}
+
+impl SerializableToJQL for JQLOrdering {
+    fn serialize_to_jql(&self) -> String {
+        match self {
+            JQLOrdering::Asc => "ASC".to_owned(),
+            JQLOrdering::Desc => "DESC".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JQLOrderByPart {
+    pub field: String,
+    pub ordering: Option<JQLOrdering>,
+}
+
+impl SerializableToJQL for JQLOrderByPart {
+    fn serialize_to_jql(&self) -> String {
+        match &self.ordering {
+            Some(ordering) => format!("{} {}", self.field, ordering.serialize_to_jql()),
+            None => self.field.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JQLOrderBy(pub Vec<JQLOrderByPart>);
+
+impl SerializableToJQL for JQLOrderBy {
+    fn serialize_to_jql(&self) -> String {
+        let serialized_fields = self
+            .0
+            .iter()
+            .map(|order| order.serialize_to_jql())
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        format!("ORDER BY {}", serialized_fields)
     }
 }
 
@@ -154,16 +211,24 @@ impl SerializableToJQL for JQLClause {
 #[derive(Debug, Clone)]
 pub struct JQLStatement {
     pub clause: JQLClause,
-    /* Order by would go here */
+    pub order_by: Option<JQLOrderBy>,
 }
 
 impl SerializableToJQL for JQLStatement {
     /// Serialize the JQL statement to its representation as part of a string.
     ///
     /// This involves formatting values correctly, and ensuring operator precedence rules are respected.
-    /// In the future, it may involve setting an order by on the statement as well.
+    /// It may optionally involve setting an order by on the statement as well.
     fn serialize_to_jql(&self) -> String {
-        self.clause.serialize_to_jql()
+        match &self.order_by {
+            Some(order_by) if order_by.0.is_empty() => self.clause.serialize_to_jql(),
+            Some(order_by) => format!(
+                "{} {}",
+                self.clause.serialize_to_jql(),
+                order_by.serialize_to_jql()
+            ),
+            None => self.clause.serialize_to_jql(),
+        }
     }
 }
 
