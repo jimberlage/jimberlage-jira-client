@@ -85,10 +85,11 @@ impl SerializableToJQL for JQLValue {
 #[derive(Debug, Clone)]
 pub enum JQLClause {
     And(Vec<Box<JQLClause>>),
+    Equals(String, JQLValue),
     GreaterThanEquals(String, JQLValue),
     In(String, Vec<JQLValue>),
     LessThanEquals(String, JQLValue),
-    /* OR, =, CONTAINS, etc. would go here */
+    /* OR, ~, CONTAINS, etc. would go here */
 }
 
 impl SerializableToJQL for JQLClause {
@@ -137,6 +138,9 @@ impl SerializableToJQL for JQLClause {
                     .collect::<Vec<String>>()
                     .join(" AND ");
                 format!("({})", joined_clauses)
+            }
+            JQLClause::Equals(field, value) => {
+                format!("{} = {}", field, value.serialize_to_jql())
             }
             JQLClause::GreaterThanEquals(field, value) => {
                 format!("{} >= {}", field, value.serialize_to_jql())
